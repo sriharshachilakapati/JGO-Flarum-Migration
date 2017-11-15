@@ -12,6 +12,7 @@ try
 
     migrateCategories($jgo, $fla);
     migrateBoards($jgo, $fla);
+    migrateUsers($jgo, $fla);
 }
 catch (PDOException $e)
 {
@@ -87,6 +88,52 @@ SQL;
             );
 
             $insert->execute($data);
+        }
+    }
+}
+
+function migrateUsers($jgo, $fla)
+{
+    $fla->exec('DELETE FROM `jgoforumsusers` WHERE id != 1');
+    $fla->exec('ALTER TABLE `jgoforumsusers` AUTO_INCREMENT = 2');
+
+    $sql = <<<SQL
+        SELECT ID_MEMBER, memberName, emailAddress, dateRegistered, lastLogin, personalText, is_activated
+        FROM `jgoforums_members` WHERE lastLogin != 0 ORDER BY ID_MEMBER ASC
+SQL;
+
+    $stmt = $jgo->query($sql);
+    $stmt->setFetchMode(PDO::FETCH_OBJ);
+
+    $sql = <<<SQL
+        INSERT INTO `jgoforumsusers` (username, email, is_activated, password, bio, join_time, last_seen_time)
+        VALUES (
+            ?, ?, ?, '', ?, ?, ?
+        )
+SQL;
+
+    $insert = $fla->prepare($sql);
+
+    while ($row = $stmt->fetch())
+    {
+        $data = array(
+            $row->memberName,
+            $row->emailAddress === "" ? slugify($row->memberName) . "-" . $row->ID_MEMBER . "@example.com" : $row->emailAddress,
+            $row->is_activated !== "0" ? 1 : 0,
+            $row->personalText,
+            date(DateTime::ATOM, $row->dateRegistered),
+            date(DateTime::ATOM, $row->lastLogin)
+        );
+
+        try
+        {
+            $insert->execute($data);
+        }
+        catch (Exception $e)
+        {
+            echo "Error while porting the following user:\n";
+            var_dump($row);
+            echo "The message was: " . $e->getMessage() . "\n";
         }
     }
 }
