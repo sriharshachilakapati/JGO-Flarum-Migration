@@ -14,7 +14,7 @@ This repository hosts a script that will perform migration of the JGO from SMF t
 
   4. Setup the admin account as `adminjgo` (anything works which is not an existing user name). This is only used to log into flarum while migration is in progress.
 
-  5. Create the source database for the migration script to use. Use the source command in the MySQL console to get the dump into the database.
+  5. Create the source database for the migration script to use. Use the source command in the MySQL console to get the dump into the database. The latest public dump can be found at http://java-gaming.org/jgo-dump-20171111-shared.zip
 
          $ mysql -uuname -p
          Enter password: ******
