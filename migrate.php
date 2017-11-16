@@ -185,7 +185,7 @@ SQL;
             }
             catch (Exception $e)
             {
-                echo "Error while updating members for the following user:\n";
+                echo "Error while updating member group for the following user:\n";
                 var_dump($data);
                 echo "The message was: " . $e->getMessage() . "\n";
             }
