@@ -33,9 +33,9 @@ try
     $fla->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 
     // Start the migration process
-    migrateCategories($jgo, $fla);
-    migrateBoards($jgo, $fla);
-    migrateUsers($jgo, $fla);
+    if (confirm("categories")) migrateCategories($jgo, $fla);
+    if (confirm("boards"))     migrateBoards($jgo, $fla);
+    if (confirm("users"))      migrateUsers($jgo, $fla);
 }
 catch (PDOException $e)
 {
@@ -327,4 +327,27 @@ function slugify($text)
         return 'n-a';
 
     return $text;
+}
+
+/**
+ * Asks a user a confirmation message and returns true or false based on yes/no.
+ */
+function confirm($text)
+{
+    echo "Migrate $text? ";
+    $str = trim(strtolower(fgets(STDIN)));
+
+    switch ($str)
+    {
+        case "yes":
+        case "y":
+        case "true":
+        case "t":
+        case "1":
+        case "ok":
+        case "k":
+            return true;
+    }
+
+    return false;
 }
