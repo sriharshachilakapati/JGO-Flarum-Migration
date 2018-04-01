@@ -21,7 +21,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-include_once('settings.php');
+require_once 'vendor/autoload.php';
+include_once 'settings.php';
+
+use s9e\TextFormatter\Bundles\Forum as TextFormatter;
 
 try
 {
