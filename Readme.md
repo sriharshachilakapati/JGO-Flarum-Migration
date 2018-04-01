@@ -23,8 +23,12 @@ This repository hosts a script that will perform migration of the JGO from SMF t
 
   6. Configure the script. Rename the `settings.sample.php` to `settings.php` and edit it to set the user names and passwords of the databases.
 
-  7. Run the migration script. This is a CLI based script, so run from a Terminal.
+  7. Install the dependencies. This project depends on the s9e/TextFormatter library.
+
+         $ composer install
+
+  8. Run the migration script. This is a CLI based script, so run from a Terminal.
 
          $ php migrate.php
 
-  8. Enjoy your migration. If there is any error, please report it in the issues along with the dump file you are using.
+  9. Enjoy your migration. If there is any error, please report it in the issues along with the dump file you are using.
