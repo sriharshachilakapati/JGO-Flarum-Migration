@@ -39,6 +39,7 @@ try
     if (confirm("categories")) migrateCategories($jgo, $fla);
     if (confirm("boards"))     migrateBoards($jgo, $fla);
     if (confirm("users"))      migrateUsers($jgo, $fla);
+    if (confirm("posts"))      migratePosts($jgo, $fla);
 }
 catch (PDOException $e)
 {
@@ -311,6 +312,71 @@ SQL;
     }
 
     echo "\n";
+}
+
+/**
+ * Function to migrate the posts from the SMF backend to the new Flarum backend. Uses the default bundle to transform
+ * the posts data from BBCode into the data format of Flarum.
+ */
+function migratePosts($jgo, $fla)
+{
+    // Clear existing posts from the forum. Also reset the AUTO_INCREMENT values for the tables.
+    $fla->exec('DELETE FROM `jgoforumsposts`');
+    $fla->exec('ALTER TABLE `jgoforumsposts` AUTO_INCREMENT = 1');
+    $fla->exec('DELETE FROM `jgoforumsdiscussions`');
+    $fla->exec('ALTER TABLE `jgoforumsdiscussions` AUTO_INCREMENT = 1');
+    $fla->exec('DELETE FROM `jgoforumsdiscussions_tags`');
+    $fla->exec('ALTER TABLE `jgoforumsdiscussions_tags` AUTO_INCREMENT = 1');
+
+    // SQL query to fetch the topics from the JGO database
+    $sql = <<<SQL
+        SELECT
+            t.ID_TOPIC, t.ID_MEMBER_STARTED, t.ID_BOARD, m.subject, m.posterTime, m.posterName, t.numReplies
+        FROM
+            `jgoforums_topics` t
+        LEFT JOIN
+            `jgoforums_messages` m ON t.ID_FIRST_MSG = m.ID_MSG
+SQL;
+
+    $topics = $jgo->query($sql);
+    $topics->setFetchMode(PDO::FETCH_OBJ);
+
+    // SQL statement to insert the topic into the Flarum backend
+    $sql = <<<SQL
+        INSERT INTO `jgoforumsdiscussions` (
+            title, comments_count, participants_count, number_index, start_time,
+            start_user_id, start_post_id, last_time, last_user_id, last_post_id, last_post_number, slug
+        ) VALUES (
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+        );
+SQL;
+    $insert_topic = $fla->prepare($sql);
+
+    $topic_count = 1;
+    $message_id = 1;
+
+    while ($topic = $topics->fetch())
+    {
+        $data = array(
+            preg_replace("/&quot;/", '"', $topic->subject),
+            $topic->numReplies,
+            1,
+            $topic->numReplies,
+            date(DateTime::ATOM, $topic->posterTime),
+            1,
+            1,
+            date(DateTime::ATOM, $topic->posterTime),
+            1,
+            1,
+            1,
+            slugify($topic->subject)
+        );
+
+        $insert_topic->execute($data);
+
+        if ($topic_count++ >= 10)
+        return;
+    }
 }
 
 /**
