@@ -179,24 +179,38 @@ function migrateUsers($jgo, $fla)
     $fla->exec('DELETE FROM `jgoforumsusers_groups` WHERE user_id != 1');
     $fla->exec('ALTER TABLE `jgoforumsusers_groups` AUTO_INCREMENT = 2');
 
+    // Create a helper table for all the users, which stores the SMF user ids with the Flarum equivalents
+    $sql = <<<SQL
+        CREATE TABLE IF NOT EXISTS `migrated_users` (
+            jgo_id VARCHAR(100),
+            fla_id VARCHAR(100)
+        );
+SQL;
+    $jgo->exec($sql);
+    $jgo->exec('TRUNCATE TABLE `migrated_users`');
+
+    // Statement to insert the migrated user id into the helper table
+    $sql = "INSERT INTO `migrated_users` (jgo_id, fla_id) VALUES (?, ?);";
+    $insert_helper = $jgo->prepare($sql);
+
     // The query to select the existing users from the SMF backend
     $sql = <<<SQL
         SELECT ID_MEMBER, memberName, emailAddress, dateRegistered, lastLogin, personalText, is_activated, ID_GROUP
-        FROM `jgoforums_members` WHERE lastLogin != 0 ORDER BY ID_MEMBER ASC
+        FROM `jgoforums_members` ORDER BY ID_MEMBER ASC
 SQL;
 
     $stmt = $jgo->query($sql);
     $stmt->setFetchMode(PDO::FETCH_OBJ);
 
     // Counters for displaying the progress info
-    $total = $jgo->query('SELECT COUNT(*) FROM `jgoforums_members` WHERE lastLogin != 0')->fetchColumn();
+    $total = $jgo->query('SELECT COUNT(*) FROM `jgoforums_members`')->fetchColumn();
     $done = 0;
 
     // The query to insert the new users into the Flarum database
     $sql = <<<SQL
-        INSERT INTO `jgoforumsusers` (username, email, is_activated, password, bio, join_time, last_seen_time)
+        INSERT INTO `jgoforumsusers` (id, username, email, is_activated, password, bio, join_time, last_seen_time)
         VALUES (
-            ?, ?, ?, '', ?, ?, ?
+            ?, ?, ?, ?, '', ?, ?, ?
         );
 SQL;
 
@@ -263,6 +277,8 @@ SQL;
         16 => 1
     );
 
+    $userId = 2;
+
     // For each user in the SMF database
     while ($row = $stmt->fetch())
     {
@@ -272,6 +288,7 @@ SQL;
 
         // Transform the user to the Flarum table
         $data = array(
+            $userId,
             $row->memberName,
             $row->emailAddress === "" ? "email" . $row->ID_MEMBER . "@example.com" : $row->emailAddress,
             $row->is_activated !== "0" ? 1 : 0,
@@ -287,7 +304,7 @@ SQL;
 
             // Compute the group record for this user
             $data = array(
-                $fla->lastInsertId(),
+                $userId,
                 $groupMap[(int) $row->ID_GROUP]
             );
 
@@ -295,6 +312,9 @@ SQL;
             {
                 // Insert the group record into the database
                 $insert2->execute($data);
+
+                // Insert the helper record into the helper table
+                $insert_helper->execute(array($row->ID_MEMBER, $userId));
             }
             catch (Exception $e)
             {
@@ -308,6 +328,10 @@ SQL;
             echo "Error while porting the following user:\n";
             var_dump($row);
             echo "The message was: " . $e->getMessage() . "\n";
+        }
+        finally
+        {
+            $userId++;
         }
     }
 
@@ -331,11 +355,14 @@ function migratePosts($jgo, $fla)
     // SQL query to fetch the topics from the JGO database
     $sql = <<<SQL
         SELECT
-            t.ID_TOPIC, t.ID_MEMBER_STARTED, t.ID_BOARD, m.subject, m.posterTime, m.posterName, t.numReplies
+            t.ID_TOPIC, t.ID_MEMBER_STARTED, t.ID_BOARD, m.subject, m.posterTime, m.posterName, t.numReplies,
+            u.fla_id
         FROM
             `jgoforums_topics` t
         LEFT JOIN
             `jgoforums_messages` m ON t.ID_FIRST_MSG = m.ID_MSG
+        LEFT JOIN
+            `migrated_users` u ON t.ID_MEMBER_STARTED = u.jgo_id
 SQL;
 
     $topics = $jgo->query($sql);
@@ -344,31 +371,74 @@ SQL;
     // SQL statement to insert the topic into the Flarum backend
     $sql = <<<SQL
         INSERT INTO `jgoforumsdiscussions` (
-            title, comments_count, participants_count, number_index, start_time,
+            id, title, comments_count, participants_count, number_index, start_time,
             start_user_id, start_post_id, last_time, last_user_id, last_post_id, last_post_number, slug
         ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
         );
 SQL;
     $insert_topic = $fla->prepare($sql);
+
+    // SQL statement to insert the post into the Flarum backend
+    $sql = <<<SQL
+        INSERT INTO `jgoforumsposts` (
+            `id`, `discussion_id`, `type`, `number`, `time`, `user_id`, `content`
+        ) VALUES (
+            ?, ?, 'comment', ?, ?, ?, ?
+        );
+SQL;
+    $insert_post = $fla->prepare($sql);
 
     $topic_count = 1;
     $message_id = 1;
 
     while ($topic = $topics->fetch())
     {
+        $sql = <<<SQL
+            SELECT m.ID_MSG, m.body, m.posterTime, u.fla_id
+            FROM `jgoforums_messages` m
+            LEFT JOIN `migrated_users` u ON m.ID_MEMBER = u.jgo_id
+            WHERE m.ID_TOPIC = {$topic->ID_TOPIC}
+SQL;
+
+        $posts = $jgo->query($sql);
+        $posts->setFetchMode(PDO::FETCH_OBJ);
+
+        $start_post_id = $message_id;
+        $last_post_id = $message_id;
+        $post_counter = 0;
+
+        $participants = array();
+
+        while ($post = $posts->fetch())
+        {
+            $data = array(
+                $last_post_id = $message_id++,
+                $topic_count,
+                $post_counter++,
+                date(DateTime::ATOM, $post->posterTime),
+                $post->fla_id,
+                TextFormatter::parse(replaceBodyStrings($post->body))
+            );
+
+            $participants[] = $post->fla_id;
+
+            $insert_post->execute($data);
+        }
+
         $data = array(
+            $topic_count,
             preg_replace("/&quot;/", '"', $topic->subject),
             $topic->numReplies,
-            1,
+            count(array_unique($participants)),
             $topic->numReplies,
             date(DateTime::ATOM, $topic->posterTime),
-            1,
-            1,
+            $topic->fla_id,
+            $last_post_id,
             date(DateTime::ATOM, $topic->posterTime),
-            1,
-            1,
-            1,
+            $topic->fla_id,
+            $last_post_id,
+            $post_counter,
             slugify($topic->subject)
         );
 
@@ -377,6 +447,19 @@ SQL;
         if ($topic_count++ >= 10)
         return;
     }
+}
+
+/**
+ * Utility function to replace some characters prior to storing in Flarum.
+ */
+function replaceBodyStrings($str)
+{
+    $str = preg_replace("/\<br\>/", "\n", $str);
+    $str = preg_replace("/&nbsp;/", " ", $str);
+    $str = preg_replace("/&quot;/", "\"", $str);
+    $str = preg_replace("/&lt;/", "<", $str);
+    $str = preg_replace("/&gt;/", ">", $str);
+    return preg_replace("/\[quote\][\s\t\r\n]*\[\/quote\]/", "", $str);
 }
 
 /**
