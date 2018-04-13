@@ -455,6 +455,7 @@ SQL;
 function replaceBodyStrings($str)
 {
     $str = preg_replace("/\<br\>/", "\n", $str);
+    $str = preg_replace("/\<br\s*\/\>/", "\n", $str);
     $str = preg_replace("/&nbsp;/", " ", $str);
     $str = preg_replace("/&quot;/", "\"", $str);
     $str = preg_replace("/&lt;/", "<", $str);
